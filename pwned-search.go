@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"crypto/sha1"
 	"fmt"
+	"github.com/a-tk/go-algorithms/strmatch"
 	"golang.org/x/term"
 	"io"
 	"log"
@@ -14,9 +15,9 @@ import (
 	"strings"
 )
 
-func readPwd(prompt string) ([]byte, error) {
+func readPwd() ([]byte, error) {
 
-	fmt.Printf(prompt)
+	fmt.Printf("enter a password:\n")
 	fd := int(os.Stdin.Fd())
 	if term.IsTerminal(fd) {
 		pwd, err := term.ReadPassword(fd)
@@ -49,25 +50,9 @@ func rangeRequest(sha1FirstFive string) (body []byte, err error) {
 	return body, err
 }
 
-// pwned-search is my implementation of the HaveIBeenPwned range password checker
-// the program takes as input one of your passwords, and checks the API to see
-// if it has been in any leak. Your password is never sent to the API or a third party
-// Passwords are read via a prompt, so they are not part of the terminal's history
-func main() {
-
-	pwd, err := readPwd("enter a password:\n")
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	sum := sha1.Sum(pwd)
-	sumString := strings.ToUpper(fmt.Sprintf("%x", sum))
-
-	sha1FirstFive := sumString[:5]
-	sha1Last := sumString[5:]
-
-	body, err := rangeRequest(sha1FirstFive)
+// given a body of bytes, parse and return a string representation of the count
+// string representation because that is already the underlying format
+func bodySearch(body []byte, sha1Last string) (count string, found bool) {
 
 	// regex is fairly slow, because we get a sorted list from the API. A faster way would be to split body by line
 	// and binary search the first part of it.
@@ -85,9 +70,68 @@ func main() {
 	})
 
 	if !found {
+		return count, false
+	} else {
+		count = strings.Split(hashes[i], ":")[1]
+		return count, true
+	}
+}
+
+func bodySearchKMP(body []byte, sha1Last string) (count string, found bool) {
+
+	i, found := strmatch.StrMatchKmpFirst(body, sha1Last)
+	if found {
+		// get the count by counting from the colon to the newline
+		endOfLine := i + len(sha1Last) // end of line occurs at newline or EOF
+		for endOfLine < len(body) && body[endOfLine] != '\n' {
+			endOfLine++
+		}
+		return string(body[i+len(sha1Last)+2 : endOfLine-1]), true
+	} else {
+		return count, false
+	}
+}
+
+func bodySearchIndex(body []byte, sha1Last string) (count string, found bool) {
+
+	i := strings.Index(string(body), sha1Last)
+	if i != -1 {
+		// get the count by counting from the colon to the newline
+		endOfLine := i + len(sha1Last) // end of line occurs at newline or EOF
+		for endOfLine < len(body) && body[endOfLine] != '\n' {
+			endOfLine++
+		}
+		return string(body[i+len(sha1Last)+1 : endOfLine-1]), true
+	} else {
+		return count, false
+	}
+}
+
+// pwned-search is my implementation of the HaveIBeenPwned range password checker
+// the program takes as input one of your passwords, and checks the API to see
+// if it has been in any leak. Your password is never sent to the API or a third party
+// Passwords are read via a prompt, so they are not part of the terminal's history
+func main() {
+
+	pwd, err := readPwd()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	sum := sha1.Sum(pwd)
+	sumString := strings.ToUpper(fmt.Sprintf("%x", sum))
+
+	sha1FirstFive := sumString[:5]
+	sha1Last := sumString[5:]
+
+	body, err := rangeRequest(sha1FirstFive)
+
+	count, found := bodySearchKMP(body, sha1Last)
+
+	if !found {
 		fmt.Printf("0\n")
 	} else {
-		count := strings.Split(hashes[i], ":")[1]
 		fmt.Printf("%s\n", count)
 	}
 }
