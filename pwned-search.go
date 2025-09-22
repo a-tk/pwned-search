@@ -28,6 +28,27 @@ func readPwd(prompt string) ([]byte, error) {
 	}
 }
 
+func rangeRequest(sha1FirstFive string) (body []byte, err error) {
+
+	res, err := http.Get("https://api.pwnedpasswords.com/range/" + sha1FirstFive)
+	if err != nil {
+		return body, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}(res.Body)
+
+	body, err = io.ReadAll(res.Body)
+
+	if res.StatusCode > 299 {
+		log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
+	}
+	return body, err
+}
+
 // pwned-search is my implementation of the HaveIBeenPwned range password checker
 // the program takes as input one of your passwords, and checks the API to see
 // if it has been in any leak. Your password is never sent to the API or a third party
@@ -42,41 +63,24 @@ func main() {
 
 	sum := sha1.Sum(pwd)
 	sumString := strings.ToUpper(fmt.Sprintf("%x", sum))
-	firstFive := sumString[:5]
-	last := sumString[5:]
 
-	res, err := http.Get("https://api.pwnedpasswords.com/range/" + firstFive)
-	if err != nil {
-		log.Fatal(err)
-	}
+	sha1FirstFive := sumString[:5]
+	sha1Last := sumString[5:]
 
-	body, err := io.ReadAll(res.Body)
+	body, err := rangeRequest(sha1FirstFive)
 
-	if res.StatusCode >= 299 {
-		log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
-	}
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = res.Body.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// regex is fairly slow, because we get a sorted list in return. A faster way would be to split body by line
+	// regex is fairly slow, because we get a sorted list from the API. A faster way would be to split body by line
 	// and binary search the first part of it.
-	// adding to a map would still require splitting, but is possible to do it in one pass.
-	// using begin/end indexes in the original byte array?
+	// adding to a map would still require splitting, but is possible to do it while reading the body
+	// using begin/end indexes in the original byte array
 	hashes := strings.Split(string(body), "\n")
 
-	i, found := slices.BinarySearchFunc(hashes, last, func(a string, b string) int {
-		// using custom function to ignore the part of the string with colon
-		// splitting is relatively inexpensive because it is performed on lgn compares
+	// each line looks like 1234FDA....1234A:1
+	// using custom function to ignore the part of the string with colon
+	// splitting is relatively inexpensive because it is performed on lgn compares
+	i, found := slices.BinarySearchFunc(hashes, sha1Last, func(a string, b string) int {
 		as := strings.Split(a, ":")
 		bs := strings.Split(b, ":")
-
 		return cmp.Compare(as[0], bs[0])
 	})
 
@@ -84,7 +88,6 @@ func main() {
 		fmt.Printf("0\n")
 	} else {
 		count := strings.Split(hashes[i], ":")[1]
-		// process extra because count has a carriage return, or maybe just print the count?
 		fmt.Printf("%s\n", count)
 	}
 }
