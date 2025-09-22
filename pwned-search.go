@@ -17,9 +17,9 @@ import (
 
 func readPwd() ([]byte, error) {
 
-	fmt.Printf("enter a password:\n")
 	fd := int(os.Stdin.Fd())
 	if term.IsTerminal(fd) {
+		fmt.Printf("enter a password:\n")
 		pwd, err := term.ReadPassword(fd)
 		return pwd, err
 	} else {
